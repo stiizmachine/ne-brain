@@ -1,0 +1,496 @@
+<title>Hollow Manor Visualizer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pirata+One&family=JetBrains+Mono:wght@400;700&display=swap">
+<style>
+/* Layout: stage on top at full width, a single control strip beneath it. Single dark look by design. */
+:root {
+  --bg: #08070a;
+  --panel: #131017;
+  --line: #2a2230;
+  --fg: #ece6ee;
+  --muted: #8f8597;
+  --accent: #ff2236;
+  --display: "Pirata One", "UnifrakturMaguntia", Georgia, serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 13px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 18px 28px;
+}
+.wrap { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+h1 { font-family: var(--display); font-weight: 400; font-size: clamp(32px, 5vw, 48px); margin: 0; line-height: 1; }
+h1 span { color: var(--accent); }
+.sub { color: var(--muted); margin: 0; }
+.stage { position: relative; display: flex; justify-content: center; }
+canvas#v {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  border-radius: 8px;
+  background: #000;
+  box-shadow: 0 0 0 1px var(--line);
+}
+canvas#v.portrait { width: auto; height: min(80vh, 760px); aspect-ratio: 9 / 16; }
+.bigplay {
+  position: absolute; inset: 0; margin: auto;
+  width: 88px; height: 88px; border-radius: 50%;
+  border: 0; padding: 0; background: var(--accent); color: #08070a;
+  font-size: 28px; display: grid; place-items: center; cursor: pointer;
+}
+.controls { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: flex-end; }
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.lbl { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.val { color: var(--fg); font-variant-numeric: tabular-nums; }
+select, input[type="text"] {
+  background: var(--panel); color: var(--fg); border: 1px solid var(--line);
+  border-radius: 4px; font: inherit; padding: 9px 10px;
+}
+input[type="text"] { width: 200px; max-width: 100%; }
+input[type="range"] { accent-color: var(--accent); width: 150px; }
+button, .file {
+  font: inherit; font-weight: 700; font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+  padding: 10px 14px; border-radius: 4px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--fg); cursor: pointer;
+  display: inline-flex; align-items: center; position: relative;
+}
+button:hover, .file:hover { border-color: var(--muted); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #08070a; }
+.file input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.file:focus-within, button:focus-visible, select:focus, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.now { color: var(--muted); font-size: 12px; margin: 0; overflow-wrap: anywhere; }
+[hidden] { display: none !important; }
+.now b { color: var(--fg); font-weight: 400; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Hollow <span>Manor</span></h1>
+    <p class="sub">Load a song. The house, the moon and the lake move to it.</p>
+  </header>
+
+  <div class="stage">
+    <canvas id="v" aria-label="Music visualizer"></canvas>
+    <button class="bigplay" id="bigplay" aria-label="Play">&#9654;</button>
+  </div>
+
+  <div class="controls">
+    <label class="file" for="song">Load song<input type="file" id="song" accept="audio/*,video/*"></label>
+    <button class="primary" id="play">Play demo beat</button>
+    <div class="field">
+      <label class="lbl" for="color">Neon</label>
+      <select id="color">
+        <option value="red">Blood red</option>
+        <option value="violet">Violet</option>
+        <option value="cyan">Ghost cyan</option>
+        <option value="white">Bone white</option>
+      </select>
+    </div>
+    <div class="field">
+      <label class="lbl" for="shape">Frame</label>
+      <select id="shape">
+        <option value="wide">16:9 wide</option>
+        <option value="tall">9:16 TikTok / Reels</option>
+      </select>
+    </div>
+    <div class="field">
+      <span class="lbl">Reactivity <span class="val" id="sensv">100%</span></span>
+      <input type="range" id="sens" min="40" max="200" value="100" aria-label="Reactivity">
+    </div>
+    <div class="field">
+      <label class="lbl" for="caption">Caption (optional)</label>
+      <input type="text" id="caption" placeholder="song name, @you" maxlength="60">
+    </div>
+    <button id="full">Fullscreen</button>
+  </div>
+  <p class="now" id="now">Playing: <b>nothing yet</b>. Tip: go fullscreen and screen-record to post it.</p>
+</div>
+
+<script>
+(() => {
+  const cv = document.getElementById('v');
+  const ctx = cv.getContext('2d');
+  const $ = id => document.getElementById(id);
+  const COLORS = {
+    red:    { a: '#ff2236', rgb: '255,34,54',  sky: '#1c0306' },
+    violet: { a: '#b24dff', rgb: '178,77,255', sky: '#11051c' },
+    cyan:   { a: '#3fe6ff', rgb: '63,230,255', sky: '#03131a' },
+    white:  { a: '#f2ece4', rgb: '242,236,228', sky: '#0e0d0c' }
+  };
+  let C = COLORS.red, W = 1280, H = 720, art = null, glow = null, stars = [], embers = [], bats = [];
+
+  // seeded random so the scene is the same every time
+  function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+  // ---------- scene geometry ----------
+  const G = {};
+  function layout() {
+    const tall = $('shape').value === 'tall';
+    W = tall ? 720 : 1280; H = tall ? 1280 : 720;
+    cv.width = W; cv.height = H;
+    cv.classList.toggle('portrait', tall);
+    G.u = tall ? 0.78 : 1;
+    G.hy = Math.round(H * (tall ? 0.6 : 0.7));
+    G.mx = W * 0.5; G.my = tall ? H * 0.27 : H * 0.3;
+    G.mr = (tall ? 150 : 118);
+    const r = rng(7);
+    stars = Array.from({ length: tall ? 260 : 300 }, () => ({
+      x: r() * W, y: r() * G.hy * 0.98, s: r() < 0.08 ? 2 + r() * 2.5 : 0.6 + r() * 1.2,
+      p: r() * Math.PI * 2, f: 0.6 + r() * 2.4, band: Math.floor(r() * 3)
+    }));
+    embers = Array.from({ length: 70 }, () => newEmber(true));
+    bats = Array.from({ length: 4 }, (_, i) => ({ x: r() * W, y: G.hy * (0.15 + r() * 0.35), v: 30 + r() * 40, ph: r() * 6, s: 0.6 + r() * 0.6, dir: i % 2 ? 1 : -1 }));
+    buildArt();
+  }
+  function newEmber(anywhere) {
+    return { x: Math.random() * W, y: anywhere ? G.hy - Math.random() * G.hy * 0.6 : G.hy + 4, v: 10 + Math.random() * 30, s: 0.8 + Math.random() * 1.8, w: Math.random() * 6 };
+  }
+
+  // Line-art: haunted house, iron fence, dead trees, graves. Drawn once to an offscreen canvas.
+  function buildArt() {
+    art = document.createElement('canvas'); art.width = W; art.height = H;
+    const g = art.getContext('2d');
+    const u = G.u, hy = G.hy, cx = W / 2, r = rng(42);
+    g.strokeStyle = C.a; g.fillStyle = C.a; g.lineCap = 'round'; g.lineJoin = 'round';
+    const L = (pts, w = 3, fill) => { g.lineWidth = w * u; g.beginPath(); pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); if (fill) { g.fillStyle = '#050305'; g.fill(); g.fillStyle = C.a; } g.stroke(); };
+    const X = x => cx + x * u, Y = y => hy - y * u;
+
+    // shoreline
+    g.lineWidth = 2 * u; g.beginPath(); g.moveTo(0, hy); g.lineTo(W, hy); g.stroke();
+
+    // house: main body with crooked gable
+    L([[X(-170), Y(0)], [X(-170), Y(165)], [X(-60), Y(165)], [X(-5), Y(245)], [X(55), Y(165)], [X(170), Y(165)], [X(170), Y(0)]], 4, true);
+    L([[X(-185), Y(165)], [X(185), Y(165)]], 4);
+    // left tower + spire
+    L([[X(-150), Y(165)], [X(-150), Y(285)], [X(-95), Y(285)], [X(-95), Y(165)]], 4, true);
+    L([[X(-160), Y(285)], [X(-122), Y(390)], [X(-85), Y(285)], [X(-160), Y(285)]], 4, true);
+    L([[X(-122), Y(390)], [X(-122), Y(420)]], 3);
+    L([[X(-131), Y(410)], [X(-113), Y(410)]], 3);
+    // right tower, leaning
+    L([[X(95), Y(165)], [X(102), Y(262)], [X(158), Y(268)], [X(152), Y(165)]], 4, true);
+    L([[X(92), Y(262)], [X(136), Y(340)], [X(170), Y(268)], [X(92), Y(262)]], 4, true);
+    // chimney
+    L([[X(40), Y(190)], [X(40), Y(225)], [X(62), Y(225)], [X(62), Y(170)]], 3, true);
+    // door with arch
+    g.lineWidth = 4 * u; g.beginPath(); g.moveTo(X(-22), Y(0)); g.lineTo(X(-22), Y(55));
+    g.arc(X(0), Y(55), 22 * u, Math.PI, 0); g.lineTo(X(22), Y(0)); g.stroke();
+    L([[X(-34), Y(0)], [X(34), Y(0)]], 6);
+    // round attic window
+    g.lineWidth = 3 * u; g.beginPath(); g.arc(X(-5), Y(198), 18 * u, 0, Math.PI * 2); g.stroke();
+    L([[X(-23), Y(198)], [X(13), Y(198)]], 2); L([[X(-5), Y(180)], [X(-5), Y(216)]], 2);
+    // window frames (lit separately)
+    G.windows = [];
+    const win = (x, y, w, h) => { g.lineWidth = 3 * u; g.strokeRect(X(x), Y(y + h), w * u, h * u); L([[X(x + w / 2), Y(y)], [X(x + w / 2), Y(y + h)]], 2); G.windows.push([X(x), Y(y + h), w * u, h * u, r()]); };
+    win(-145, 95, 34, 46); win(-95, 95, 34, 46); win(65, 95, 34, 46); win(115, 95, 34, 46);
+    win(-138, 215, 26, 38); win(112, 205, 26, 36);
+    win(-145, 18, 34, 46); win(115, 18, 34, 46);
+    // porch posts
+    L([[X(-60), Y(0)], [X(-60), Y(80)], [X(60), Y(80)], [X(60), Y(0)]], 3);
+    L([[X(-70), Y(80)], [X(70), Y(80)]], 4);
+
+    // iron fence across the shore
+    const fy = hy, fh = 46 * u;
+    for (let x = 6; x < W; x += 22 * u) {
+      if (Math.abs(x - cx) < 52 * u) continue; // gate gap
+      const lean = (r() - 0.5) * 6 * u;
+      L([[x, fy], [x + lean, fy - fh]], 2);
+      L([[x + lean - 4 * u, fy - fh + 6 * u], [x + lean, fy - fh - 6 * u], [x + lean + 4 * u, fy - fh + 6 * u]], 2);
+    }
+    [[0, cx - 52 * u], [cx + 52 * u, W]].forEach(([a, b]) => { L([[a, fy - fh * 0.75], [b, fy - fh * 0.75]], 2); L([[a, fy - fh * 0.2], [b, fy - fh * 0.2]], 2); });
+
+    // graves
+    const grave = (x, w, h, cross) => {
+      const gx = X(x);
+      if (cross) { L([[gx, hy], [gx, hy - h * u]], 4); L([[gx - w * 0.4 * u, hy - h * 0.72 * u], [gx + w * 0.4 * u, hy - h * 0.72 * u]], 4); return; }
+      g.lineWidth = 3 * u; g.beginPath(); g.moveTo(gx - w / 2 * u, hy); g.lineTo(gx - w / 2 * u, hy - (h - w / 2) * u);
+      g.arc(gx, hy - (h - w / 2) * u, w / 2 * u, Math.PI, 0); g.lineTo(gx + w / 2 * u, hy); g.stroke();
+      L([[gx - w * 0.2 * u, hy - h * 0.55 * u], [gx + w * 0.2 * u, hy - h * 0.55 * u]], 2);
+    };
+    const tall = H > W;
+    const gs = tall ? [[-260, 30, 44], [-215, 22, 54, 1], [235, 28, 40], [275, 22, 50, 1]] : [[-300, 30, 44], [-250, 22, 56, 1], [-370, 26, 36], [265, 28, 42], [320, 22, 54, 1], [395, 30, 38]];
+    gs.forEach(a => grave(...a));
+
+    // dead trees
+    const tree = (x, len, ang, depth, w) => {
+      const x2 = x[0] + Math.cos(ang) * len, y2 = x[1] + Math.sin(ang) * len;
+      g.lineWidth = Math.max(1, w); g.beginPath(); g.moveTo(x[0], x[1]); g.lineTo(x2, y2); g.stroke();
+      if (depth <= 0) return;
+      const n = r() < 0.3 ? 3 : 2;
+      for (let i = 0; i < n; i++) tree([x2, y2], len * (0.62 + r() * 0.16), ang + (r() - 0.5) * 1.3, depth - 1, w * 0.68);
+    };
+    const tw = tall ? [[0.1, 120], [0.92, 105]] : [[0.08, 135], [0.2, 80], [0.9, 125], [0.79, 75]];
+    tw.forEach(([fx, s]) => tree([W * fx, hy], s * u, -Math.PI / 2 + (r() - 0.5) * 0.3, 7, 9 * u));
+
+    // blurred copy for the beat glow
+    glow = document.createElement('canvas'); glow.width = W; glow.height = H;
+    const gg = glow.getContext('2d');
+    gg.filter = 'blur(10px)'; gg.drawImage(art, 0, 0); gg.filter = 'blur(3px)'; gg.drawImage(art, 0, 0);
+  }
+
+  // grain texture
+  const grain = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 180;
+    const g = c.getContext('2d'), d = g.createImageData(180, 180);
+    for (let i = 0; i < d.data.length; i += 4) { const v = Math.random() * 255; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255; }
+    g.putImageData(d, 0, 0); return c;
+  })();
+
+  // ---------- audio ----------
+  let A = null, analyser, freq, wave, mediaEl = null, mediaSrc = null, demoGain = null, demoTimer = null;
+  let mode = 'none', playing = false;
+  function initAudio() {
+    if (A) return;
+    A = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = A.createAnalyser(); analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.78;
+    analyser.connect(A.destination);
+    freq = new Uint8Array(analyser.frequencyBinCount); wave = new Uint8Array(analyser.fftSize);
+    demoGain = A.createGain(); demoGain.gain.value = 0.85; demoGain.connect(analyser);
+  }
+
+  // demo beat: slow dark trap with a music-box melody
+  let step = 0, nextT = 0, noiseBuf = null;
+  const BPM = 140, SL = 60 / BPM / 4;
+  const nb = () => { if (noiseBuf) return noiseBuf; noiseBuf = A.createBuffer(1, A.sampleRate * 0.5, A.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; return noiseBuf; };
+  const env = (gn, t, p, d) => { gn.gain.setValueAtTime(0.0001, t); gn.gain.exponentialRampToValueAtTime(p, t + 0.005); gn.gain.exponentialRampToValueAtTime(0.0001, t + d); };
+  function osc(type, f, t, p, d, dest = demoGain) { const o = A.createOscillator(), g = A.createGain(); o.type = type; o.frequency.value = f; env(g, t, p, d); o.connect(g); g.connect(dest); o.start(t); o.stop(t + d + 0.05); return o; }
+  function kick(t) { const o = osc('sine', 150, t, 1, 0.9); o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(38, t + 0.12); }
+  function snap(t) { const s = A.createBufferSource(); s.buffer = nb(); const f = A.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 2200; f.Q.value = 0.8; const g = A.createGain(); env(g, t, 0.6, 0.2); s.connect(f); f.connect(g); g.connect(demoGain); s.start(t); s.stop(t + 0.25); }
+  function hat(t, v) { const s = A.createBufferSource(); s.buffer = nb(); const f = A.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 8000; const g = A.createGain(); env(g, t, v, 0.04); s.connect(f); f.connect(g); g.connect(demoGain); s.start(t); s.stop(t + 0.06); }
+  const midi = n => 440 * Math.pow(2, (n - 69) / 12);
+  const BOX = [[76, null, 79, null, 77, null, 76, 74, 76, null, null, null, 71, null, 72, null], [76, null, 79, null, 81, null, 79, 77, 76, null, 74, null, 72, null, 71, null]];
+  const BASS = [40, 40, 43, 38];
+  function sched(k, t) {
+    const i = k % 16, bar = Math.floor(k / 16);
+    const n = BOX[bar % 2][i];
+    if (n) { osc('sine', midi(n), t, 0.16, 0.9); osc('triangle', midi(n + 12), t, 0.04, 0.4); }
+    if (i % 2 === 0) hat(t, 0.1); else if (bar % 2 && i > 11) hat(t, 0.06);
+    if (i === 0 || i === 10 || (bar % 2 && i === 13)) { kick(t); osc('sine', midi(BASS[bar % 4] - 12) * 1, t, 0.5, 1.2); }
+    if (i === 8) snap(t);
+  }
+  function demoTick() { while (nextT < A.currentTime + 0.12) { sched(step, nextT); step++; nextT += SL; } }
+  function startDemo() { stopSong(); mode = 'demo'; step = 0; nextT = A.currentTime + 0.05; demoTimer = setInterval(demoTick, 25); setNow('Demo beat'); }
+  function stopDemo() { clearInterval(demoTimer); demoTimer = null; }
+  function stopSong() { if (mediaEl) mediaEl.pause(); }
+
+  function setNow(name) { $('now').innerHTML = ''; $('now').append('Playing: '); const b = document.createElement('b'); b.textContent = name; $('now').append(b, '. Tip: go fullscreen and screen-record to post it.'); }
+
+  $('song').addEventListener('change', e => {
+    const f = e.target.files && e.target.files[0]; if (!f) return;
+    initAudio();
+    stopDemo();
+    if (!mediaEl) {
+      mediaEl = new Audio(); mediaEl.loop = true; mediaEl.crossOrigin = 'anonymous';
+      mediaSrc = A.createMediaElementSource(mediaEl); mediaSrc.connect(analyser);
+    }
+    if (mediaEl.src) URL.revokeObjectURL(mediaEl.src);
+    mediaEl.src = URL.createObjectURL(f);
+    mode = 'song';
+    const name = f.name.replace(/\.[^.]+$/, '');
+    setNow(name);
+    if (!$('caption').value) $('caption').placeholder = name;
+    $('play').textContent = 'Pause';
+    A.resume(); mediaEl.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+  });
+
+  function setPlaying(p) {
+    playing = p;
+    $('bigplay').hidden = p;
+    $('play').textContent = p ? 'Pause' : (mode === 'song' ? 'Play song' : 'Play demo beat');
+  }
+  function toggle() {
+    initAudio();
+    if (playing) {
+      if (mode === 'song') mediaEl.pause(); else { stopDemo(); A.suspend(); }
+      setPlaying(false); return;
+    }
+    A.resume();
+    if (mode === 'song') { mediaEl.play(); }
+    else if (mode === 'demo') { nextT = Math.max(nextT, A.currentTime + 0.05); demoTimer = setInterval(demoTick, 25); }
+    else startDemo();
+    setPlaying(true);
+  }
+  $('play').onclick = toggle; $('bigplay').onclick = toggle;
+  $('full').onclick = () => { const p = cv.requestFullscreen ? cv.requestFullscreen() : null; if (p && p.catch) p.catch(() => {}); };
+  $('color').onchange = () => { C = COLORS[$('color').value]; buildArt(); };
+  $('shape').onchange = () => layout();
+  $('sens').oninput = () => { $('sensv').textContent = $('sens').value + '%'; };
+
+  // ---------- analysis ----------
+  const lv = { bass: 0.45, mid: 0.35, high: 0.3, beat: 0.6, avg: 0.3, last: 0 };
+  const band = (a, b) => { let s = 0; for (let i = a; i < b; i++) s += freq[i]; return s / ((b - a) * 255); };
+  function analyse(now) {
+    if (!A || !playing) return false;
+    analyser.getByteFrequencyData(freq); analyser.getByteTimeDomainData(wave);
+    const k = +$('sens').value / 100;
+    const bass = Math.min(1, band(1, 7) * k), mid = Math.min(1, band(8, 90) * k * 1.4), high = Math.min(1, band(120, 500) * k * 2.4);
+    lv.bass += (bass - lv.bass) * 0.5; lv.mid += (mid - lv.mid) * 0.3; lv.high += (high - lv.high) * 0.4;
+    lv.avg += (bass - lv.avg) * 0.04;
+    if (bass > lv.avg * 1.18 && bass > 0.3 && now - lv.last > 0.22) { lv.beat = 1; lv.last = now; }
+    return true;
+  }
+
+  // ---------- draw ----------
+  function spectrum(i, n) {
+    // log-spaced bins so bass and treble both get room
+    const lo = Math.floor(2 * Math.pow(400, i / n)), hi = Math.max(lo + 1, Math.floor(2 * Math.pow(400, (i + 1) / n)));
+    return band(lo, hi);
+  }
+  let lastNow = performance.now() / 1000;
+  function frame() {
+    const now = performance.now() / 1000, dt = Math.min(0.05, now - lastNow); lastNow = now;
+    const live = analyse(now);
+    if (!live) { lv.beat = 0.6; }
+    else lv.beat *= Math.pow(0.02, dt);
+    const { bass, mid, high, beat } = lv;
+    const t = now, hy = G.hy, u = G.u;
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    // camera punch
+    const z = 1 + beat * 0.025 + bass * 0.01;
+    const sx = live ? (Math.random() - 0.5) * beat * 6 : 0, sy = live ? (Math.random() - 0.5) * beat * 6 : 0;
+    ctx.translate(W / 2 + sx, hy + sy); ctx.scale(z, z); ctx.translate(-W / 2, -hy);
+
+    // sky
+    const sky = ctx.createLinearGradient(0, 0, 0, hy);
+    sky.addColorStop(0, '#000'); sky.addColorStop(0.7, '#040205'); sky.addColorStop(1, C.sky);
+    ctx.fillStyle = sky; ctx.fillRect(-40, -40, W + 80, hy + 40);
+
+    // stars twinkle with the treble
+    for (const s of stars) {
+      const tw = 0.35 + 0.65 * Math.abs(Math.sin(t * s.f + s.p));
+      const a = Math.min(1, tw * (0.45 + high * 1.1 + (s.band === 0 ? beat * 0.4 : 0)));
+      ctx.globalAlpha = a; ctx.fillStyle = '#fff';
+      if (s.s > 2) {
+        const r = s.s * (1 + high * 0.8);
+        ctx.beginPath(); ctx.moveTo(s.x, s.y - r * 2); ctx.lineTo(s.x + r * 0.4, s.y - r * 0.4); ctx.lineTo(s.x + r * 2, s.y);
+        ctx.lineTo(s.x + r * 0.4, s.y + r * 0.4); ctx.lineTo(s.x, s.y + r * 2); ctx.lineTo(s.x - r * 0.4, s.y + r * 0.4);
+        ctx.lineTo(s.x - r * 2, s.y); ctx.lineTo(s.x - r * 0.4, s.y - r * 0.4); ctx.closePath(); ctx.fill();
+      } else ctx.fillRect(s.x, s.y, s.s, s.s);
+    }
+    ctx.globalAlpha = 1;
+
+    // blood moon with spectrum ring
+    const mr = G.mr * (1 + bass * 0.07 + beat * 0.03);
+    const halo = ctx.createRadialGradient(G.mx, G.my, mr * 0.6, G.mx, G.my, mr * 3);
+    halo.addColorStop(0, `rgba(${C.rgb},${0.22 + beat * 0.25})`); halo.addColorStop(1, `rgba(${C.rgb},0)`);
+    ctx.fillStyle = halo; ctx.fillRect(G.mx - mr * 3, G.my - mr * 3, mr * 6, mr * 6);
+    const mg = ctx.createRadialGradient(G.mx - mr * 0.3, G.my - mr * 0.3, mr * 0.1, G.mx, G.my, mr);
+    mg.addColorStop(0, `rgba(${C.rgb},0.55)`); mg.addColorStop(1, `rgba(${C.rgb},0.12)`);
+    ctx.fillStyle = mg; ctx.beginPath(); ctx.arc(G.mx, G.my, mr, 0, Math.PI * 2); ctx.fill();
+    // craters
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    [[-0.3, -0.2, 0.18], [0.25, 0.1, 0.12], [-0.05, 0.35, 0.1], [0.35, -0.35, 0.08]].forEach(([a, b, c]) => { ctx.beginPath(); ctx.arc(G.mx + a * mr, G.my + b * mr, c * mr, 0, Math.PI * 2); ctx.fill(); });
+    ctx.strokeStyle = C.a; ctx.lineWidth = 3 * u; ctx.beginPath(); ctx.arc(G.mx, G.my, mr, 0, Math.PI * 2); ctx.stroke();
+    const N = 72;
+    ctx.lineCap = 'round'; ctx.lineWidth = 3.2 * u;
+    for (let i = 0; i < N; i++) {
+      const v = live ? spectrum(i % (N / 2), N / 2) : 0.25 + 0.2 * Math.sin(i * 0.7) ** 2;
+      const len = 6 + v * mr * 0.95 * (+$('sens').value / 100);
+      const ang = -Math.PI / 2 + (i < N / 2 ? i : N - i - 0.5) / (N / 2) * Math.PI * (i < N / 2 ? 1 : -1);
+      const c = Math.cos(ang), s = Math.sin(ang);
+      ctx.globalAlpha = 0.55 + v * 0.45;
+      ctx.strokeStyle = v > 0.7 ? '#fff' : C.a;
+      ctx.beginPath(); ctx.moveTo(G.mx + c * (mr + 8 * u), G.my + s * (mr + 8 * u)); ctx.lineTo(G.mx + c * (mr + 8 * u + len), G.my + s * (mr + 8 * u + len)); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // bats
+    for (const b of bats) {
+      b.x += b.v * b.dir * dt * (1 + mid); if (b.x > W + 40) b.x = -40; if (b.x < -40) b.x = W + 40;
+      const by = b.y + Math.sin(t * 1.3 + b.ph) * 14, f = Math.sin(t * 14 + b.ph) * 7 * b.s, sc = 12 * b.s * u;
+      ctx.fillStyle = '#000'; ctx.strokeStyle = `rgba(${C.rgb},0.8)`; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(b.x, by);
+      ctx.quadraticCurveTo(b.x - sc, by - f - sc * 0.4, b.x - sc * 2, by - f);
+      ctx.quadraticCurveTo(b.x - sc, by - f * 0.3 + sc * 0.2, b.x, by + sc * 0.3);
+      ctx.quadraticCurveTo(b.x + sc, by - f * 0.3 + sc * 0.2, b.x + sc * 2, by - f);
+      ctx.quadraticCurveTo(b.x + sc, by - f - sc * 0.4, b.x, by);
+      ctx.fill(); ctx.stroke();
+    }
+
+    // lit windows flicker with the mids
+    for (const [x, y, w, h, seed] of G.windows) {
+      const on = 0.15 + mid * 0.9 * (0.6 + 0.4 * Math.sin(t * (2 + seed * 5) + seed * 9));
+      ctx.fillStyle = `rgba(${C.rgb},${Math.min(0.85, on)})`; ctx.fillRect(x, y, w, h);
+    }
+
+    // line art + beat glow
+    ctx.globalAlpha = 0.75 + beat * 0.25; ctx.drawImage(art, 0, 0);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.25 + beat * 0.75 + bass * 0.2; ctx.drawImage(glow, 0, 0);
+    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+
+    // embers rising off the water
+    for (const e of embers) {
+      e.y -= e.v * dt * (1 + mid * 2.5); e.x += Math.sin(t * 1.5 + e.w) * 0.3;
+      if (e.y < hy * 0.3) Object.assign(e, newEmber(false));
+      const a = Math.max(0, (e.y - hy * 0.3) / (hy * 0.7)) * (0.5 + 0.5 * Math.sin(t * 6 + e.w));
+      ctx.globalAlpha = a; ctx.fillStyle = C.a; ctx.fillRect(e.x, e.y, e.s, e.s);
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    // lake: rippling reflection of everything above the shore
+    const lakeH = H - hy;
+    for (let y = 0; y < lakeH; y += 3) {
+      const depth = y / lakeH;
+      const off = Math.sin(y * 0.09 - t * 2.4) * (1.5 + depth * 6) * (1 + bass * 2.2);
+      const srcY = hy - 1 - y * (hy / lakeH) * 0.55;
+      ctx.drawImage(cv, 0, srcY, W, 3, off, hy + y, W, 3);
+    }
+    const lake = ctx.createLinearGradient(0, hy, 0, H);
+    lake.addColorStop(0, 'rgba(0,0,0,0.35)'); lake.addColorStop(1, 'rgba(0,0,0,0.88)');
+    ctx.fillStyle = lake; ctx.fillRect(0, hy, W, lakeH);
+
+    // waveform skimming the water
+    if (live) {
+      ctx.strokeStyle = C.a; ctx.globalAlpha = 0.85; ctx.lineWidth = 2 * u; ctx.beginPath();
+      const wy = hy + lakeH * 0.42, amp = lakeH * 0.22;
+      for (let i = 0; i <= 200; i++) {
+        const x = i / 200 * W, v = (wave[Math.floor(i / 200 * (wave.length - 1))] - 128) / 128;
+        const fade = Math.sin(i / 200 * Math.PI);
+        i ? ctx.lineTo(x, wy + v * amp * fade) : ctx.moveTo(x, wy);
+      }
+      ctx.stroke(); ctx.globalAlpha = 1;
+    }
+
+    // caption
+    const cap = $('caption').value.trim();
+    if (cap) {
+      ctx.font = `${Math.round(40 * u)}px "Pirata One", Georgia, serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.shadowColor = C.a; ctx.shadowBlur = 12 + beat * 24; ctx.fillStyle = '#fff';
+      ctx.fillText(cap, W / 2, H - lakeH * 0.16);
+      ctx.shadowBlur = 0;
+    }
+
+    // between-beat dim, like a pulse
+    if (live) { ctx.fillStyle = `rgba(0,0,0,${(1 - beat) * 0.22})`; ctx.fillRect(0, 0, W, H); }
+
+    // grain + vignette
+    ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.12;
+    const ox = Math.random() * 180 | 0, oy = Math.random() * 180 | 0;
+    for (let x = -ox; x < W; x += 180) for (let y = -oy; y < H; y += 180) ctx.drawImage(grain, x, y);
+    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+    const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.75);
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.75)');
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+
+    requestAnimationFrame(frame);
+  }
+
+  layout();
+  const fonts = document.fonts && document.fonts.load ? document.fonts.load('40px "Pirata One"').catch(() => {}) : Promise.resolve();
+  fonts.then(() => {});
+  requestAnimationFrame(frame);
+})();
+</script>
