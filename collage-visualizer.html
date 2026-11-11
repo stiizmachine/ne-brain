@@ -100,7 +100,7 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
   <p class="now" id="now">Playing: <b>nothing yet</b>. Go fullscreen and screen-record to post it.</p>
   <p class="credits">Photos, all public domain, from Wikimedia Commons:
     <a href="https://commons.wikimedia.org/wiki/File:Full_moon_partially_obscured_by_atmosphere.jpg">full moon (NASA)</a>,
-    <a href="https://commons.wikimedia.org/wiki/File:Henry_Cool_Park_merry-go-round_1.JPG">merry-go-round</a>,
+    <a href="https://commons.wikimedia.org/wiki/File:Bilibin._Baba_Yaga.jpg">Baba Yaga by Ivan Bilibin (1900)</a>,
     <a href="https://commons.wikimedia.org/wiki/File:Corvus_corax_(NPS).jpg">raven (NPS)</a>,
     <a href="https://commons.wikimedia.org/wiki/File:Dead_trees_silhouetted_against_cloudy_sky._(8c8556be7c9e4c7ba294e6f2c7d871f0).JPG">dead trees</a>,
     <a href="https://commons.wikimedia.org/wiki/File:Galets.jpg">pebbles</a>.
@@ -116,7 +116,7 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
   const INK_RGB = { red: '255,34,54', purple: '170,60,255', pink: '255,70,170' };
 
   // ---------- images ----------
-  const SRC = { moon: 'collage/moon.png', ground: 'collage/ground.jpg', mgr: 'collage/merrygoround.jpg', raven: 'collage/raven.png', trees: 'collage/deadtrees.png' };
+  const SRC = { moon: 'collage/moon.png', ground: 'collage/ground.jpg', yaga: 'collage/babayaga.png', raven: 'collage/raven.png', trees: 'collage/deadtrees.png' };
   const IMG = {};
   const loaded = Promise.all(Object.entries(SRC).map(([k, src]) => new Promise(res => {
     const im = new Image(); im.onload = () => { IMG[k] = im; res(); }; im.onerror = () => res(); im.src = src;
@@ -125,16 +125,11 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
   const INKED = {};
   function recolor() {
     const f = INKS[$('color').value];
-    for (const k of ['mgr', 'raven', 'trees']) {
+    for (const k of ['raven', 'trees']) {
       const im = IMG[k]; if (!im) continue;
       const c = document.createElement('canvas'); c.width = im.width; c.height = im.height;
       const g = c.getContext('2d'); if (f) g.filter = f; g.drawImage(im, 0, 0);
       INKED[k] = c;
-    }
-    if (INKED.mgr) {
-      const c = document.createElement('canvas'); c.width = INKED.mgr.width; c.height = INKED.mgr.height;
-      const g = c.getContext('2d'); g.filter = 'blur(9px)'; g.drawImage(INKED.mgr, 0, 0); g.filter = 'blur(2px)'; g.drawImage(INKED.mgr, 0, 0);
-      INKED.glow = c;
     }
   }
 
@@ -147,14 +142,14 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
     L = tall ? {
       hillTop: 860, hillR: 1500,
       moon: [530, 230, 120],
-      mgr: [W / 2, 900, 760],
+      yaga: [W / 2, 560, 620],
       trees: [-80, 880, 420],
       raven: [540, 900, 300],
       cap: 1180
     } : {
       hillTop: 520, hillR: 2300,
       moon: [1080, 130, 82],
-      mgr: [W / 2 + 20, 545, 820],
+      yaga: [W / 2 + 10, 320, 470],
       trees: [-40, 540, 360],
       raven: [1050, 545, 330],
       cap: 680
@@ -301,16 +296,19 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
       ctx.restore();
     }
 
-    // merry-go-round, red lines added with a glow on each kick
-    if (INKED.mgr) {
-      const [cx, base, w0] = L.mgr, w = w0 * (1 + beat * 0.025);
-      const [ww, hh] = fitW(INKED.mgr, w);
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = 0.85 + beat * 0.15;
-      ctx.drawImage(INKED.mgr, cx - ww / 2, base - hh, ww, hh);
-      ctx.globalAlpha = 0.2 + beat * 0.8 + bass * 0.2;
-      ctx.drawImage(INKED.glow, cx - ww / 2, base - hh, ww, hh);
-      ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+    // Baba Yaga in her mortar: paper cutout, moved in steps like old cutout animation
+    if (IMG.yaga) {
+      const [cx, cy, h0] = L.yaga, tq = Math.floor(t * 12) / 12;
+      const h = h0 * (1 + beat * 0.03), w = h * IMG.yaga.width / IMG.yaga.height;
+      const x = cx + Math.sin(tq * 0.45) * 70, y = cy + Math.sin(tq * 1.6) * 14 - beat * 16;
+      const warm = ctx.createRadialGradient(x, y, 0, x, y, h * 0.8);
+      warm.addColorStop(0, `rgba(255,190,120,${0.06 + beat * 0.14})`); warm.addColorStop(1, 'rgba(255,190,120,0)');
+      ctx.fillStyle = warm; ctx.fillRect(x - h, y - h, h * 2, h * 2);
+      ctx.save(); ctx.translate(x, y);
+      ctx.rotate(-0.12 + Math.sin(tq * 1.1) * 0.05 - beat * 0.06);
+      ctx.shadowColor = 'rgba(0,0,0,0.7)'; ctx.shadowBlur = 24; ctx.shadowOffsetX = 10; ctx.shadowOffsetY = 14;
+      ctx.drawImage(IMG.yaga, -w / 2, -h / 2, w, h);
+      ctx.restore();
     }
 
     // ground: curved hill of grainy pebbles
@@ -350,6 +348,12 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 
     // the pulse: the whole frame dips darker between kicks
     if (live) { ctx.fillStyle = `rgba(0,0,0,${(1 - beat) * 0.3})`; ctx.fillRect(0, 0, W, H); }
+
+    // old film print: dust specks, a scratch now and then, gate flicker
+    ctx.fillStyle = 'rgba(235,225,205,0.5)';
+    for (let i = 0; i < 6; i++) if (Math.random() < 0.5) { ctx.beginPath(); ctx.arc(Math.random() * W, Math.random() * H, Math.random() * 2.2, 0, 6.28); ctx.fill(); }
+    if (Math.random() < 0.25) { const sx = Math.random() * W; ctx.fillStyle = 'rgba(230,220,200,0.18)'; ctx.fillRect(sx, 0, 1.4, H); }
+    ctx.fillStyle = `rgba(60,40,20,${0.05 + Math.random() * 0.04})`; ctx.fillRect(0, 0, W, H);
 
     // grain + soft vignette
     ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.14;
