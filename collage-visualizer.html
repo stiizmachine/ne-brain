@@ -1,0 +1,369 @@
+<title>Night Yard Visualizer</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Special+Elite&family=JetBrains+Mono:wght@400;700&display=swap">
+<style>
+/* Layout: the stage on top at full width, one strip of controls under it, photo credits at the bottom. Single dark look by design. */
+:root {
+  --bg: #080707;
+  --panel: #141112;
+  --line: #2b2324;
+  --fg: #ebe5e3;
+  --muted: #8e8483;
+  --accent: #ff2236;
+  --display: "Special Elite", "Courier New", monospace;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+[hidden] { display: none !important; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--mono); font-size: 13px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 18px 28px;
+}
+.wrap { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+h1 { font-family: var(--display); font-weight: 400; font-size: clamp(30px, 4.6vw, 44px); margin: 0; line-height: 1; }
+h1 span { color: var(--accent); }
+.sub { color: var(--muted); margin: 0; }
+.stage { position: relative; display: flex; justify-content: center; }
+canvas#v { display: block; width: 100%; max-width: 100%; border-radius: 6px; background: #000; box-shadow: 0 0 0 1px var(--line); }
+canvas#v.portrait { width: auto; height: min(80vh, 760px); aspect-ratio: 9 / 16; }
+.bigplay {
+  position: absolute; inset: 0; margin: auto; width: 84px; height: 84px; border-radius: 50%;
+  border: 0; padding: 0; background: var(--accent); color: #080707; font-size: 26px;
+  display: grid; place-items: center; cursor: pointer;
+}
+.controls { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: flex-end; }
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.lbl { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.val { color: var(--fg); font-variant-numeric: tabular-nums; }
+select, input[type="text"] { background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; font: inherit; padding: 9px 10px; }
+input[type="text"] { width: 200px; max-width: 100%; }
+input[type="range"] { accent-color: var(--accent); width: 150px; }
+button, .file {
+  font: inherit; font-weight: 700; font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+  padding: 10px 14px; border-radius: 4px; border: 1px solid var(--line); background: var(--panel); color: var(--fg);
+  cursor: pointer; display: inline-flex; align-items: center; position: relative;
+}
+button:hover, .file:hover { border-color: var(--muted); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #080707; }
+.file input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.file:focus-within, button:focus-visible, select:focus, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.now { color: var(--muted); font-size: 12px; margin: 0; overflow-wrap: anywhere; }
+.now b { color: var(--fg); font-weight: 400; }
+.credits { color: var(--muted); font-size: 11px; line-height: 1.7; margin: 0; max-width: 90ch; }
+.credits a { color: var(--muted); }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Night <span>Yard</span></h1>
+    <p class="sub">A photo collage that pulses to whatever song you load.</p>
+  </header>
+
+  <div class="stage">
+    <canvas id="v" aria-label="Music visualizer"></canvas>
+    <button class="bigplay" id="bigplay" aria-label="Play">&#9654;</button>
+  </div>
+
+  <div class="controls">
+    <label class="file" for="song">Load song<input type="file" id="song" accept="audio/*,video/*"></label>
+    <button class="primary" id="play">Play demo beat</button>
+    <div class="field">
+      <label class="lbl" for="color">Ink</label>
+      <select id="color">
+        <option value="red">Red</option>
+        <option value="purple">Purple</option>
+        <option value="pink">Pink</option>
+      </select>
+    </div>
+    <div class="field">
+      <label class="lbl" for="shape">Frame</label>
+      <select id="shape">
+        <option value="wide">16:9 wide</option>
+        <option value="tall">9:16 TikTok / Reels</option>
+      </select>
+    </div>
+    <div class="field">
+      <span class="lbl">Reactivity <span class="val" id="sensv">100%</span></span>
+      <input type="range" id="sens" min="40" max="200" value="100" aria-label="Reactivity">
+    </div>
+    <div class="field">
+      <label class="lbl" for="caption">Caption (optional)</label>
+      <input type="text" id="caption" placeholder="song name, @you" maxlength="60">
+    </div>
+    <button id="full">Fullscreen</button>
+  </div>
+  <p class="now" id="now">Playing: <b>nothing yet</b>. Go fullscreen and screen-record to post it.</p>
+  <p class="credits">Photos, all public domain, from Wikimedia Commons:
+    <a href="https://commons.wikimedia.org/wiki/File:Full_moon_partially_obscured_by_atmosphere.jpg">full moon (NASA)</a>,
+    <a href="https://commons.wikimedia.org/wiki/File:Henry_Cool_Park_merry-go-round_1.JPG">merry-go-round</a>,
+    <a href="https://commons.wikimedia.org/wiki/File:Corvus_corax_(NPS).jpg">raven (NPS)</a>,
+    <a href="https://commons.wikimedia.org/wiki/File:Dead_trees_silhouetted_against_cloudy_sky._(8c8556be7c9e4c7ba294e6f2c7d871f0).JPG">dead trees</a>,
+    <a href="https://commons.wikimedia.org/wiki/File:Galets.jpg">pebbles</a>.
+  </p>
+</div>
+
+<script>
+(() => {
+  const cv = document.getElementById('v');
+  const ctx = cv.getContext('2d');
+  const $ = id => document.getElementById(id);
+  const INKS = { red: null, purple: 'hue-rotate(275deg) saturate(1.3)', pink: 'hue-rotate(320deg) saturate(1.1) brightness(1.15)' };
+  const INK_RGB = { red: '255,34,54', purple: '170,60,255', pink: '255,70,170' };
+
+  // ---------- images ----------
+  const SRC = { moon: 'collage/moon.png', ground: 'collage/ground.jpg', mgr: 'collage/merrygoround.jpg', raven: 'collage/raven.png', trees: 'collage/deadtrees.png' };
+  const IMG = {};
+  const loaded = Promise.all(Object.entries(SRC).map(([k, src]) => new Promise(res => {
+    const im = new Image(); im.onload = () => { IMG[k] = im; res(); }; im.onerror = () => res(); im.src = src;
+  })));
+  // recolored copies of the red pieces, plus a blurred glow of the merry-go-round
+  const INKED = {};
+  function recolor() {
+    const f = INKS[$('color').value];
+    for (const k of ['mgr', 'raven', 'trees']) {
+      const im = IMG[k]; if (!im) continue;
+      const c = document.createElement('canvas'); c.width = im.width; c.height = im.height;
+      const g = c.getContext('2d'); if (f) g.filter = f; g.drawImage(im, 0, 0);
+      INKED[k] = c;
+    }
+    if (INKED.mgr) {
+      const c = document.createElement('canvas'); c.width = INKED.mgr.width; c.height = INKED.mgr.height;
+      const g = c.getContext('2d'); g.filter = 'blur(9px)'; g.drawImage(INKED.mgr, 0, 0); g.filter = 'blur(2px)'; g.drawImage(INKED.mgr, 0, 0);
+      INKED.glow = c;
+    }
+  }
+
+  // ---------- layout ----------
+  let W = 1280, H = 720, L = {}, stars = [];
+  function layout() {
+    const tall = $('shape').value === 'tall';
+    W = tall ? 720 : 1280; H = tall ? 1280 : 720;
+    cv.width = W; cv.height = H; cv.classList.toggle('portrait', tall);
+    L = tall ? {
+      hillTop: 860, hillR: 1500,
+      moon: [530, 230, 120],
+      mgr: [W / 2, 900, 760],
+      trees: [-80, 880, 420],
+      raven: [540, 900, 300],
+      cap: 1180
+    } : {
+      hillTop: 520, hillR: 2300,
+      moon: [1080, 130, 82],
+      mgr: [W / 2 + 20, 545, 820],
+      trees: [-40, 540, 360],
+      raven: [1050, 545, 330],
+      cap: 680
+    };
+    const r = mulberry(11);
+    stars = Array.from({ length: tall ? 150 : 190 }, () => ({
+      x: r() * W, y: r() * L.hillTop * 0.95, big: r() < 0.22, s: 0.7 + r() * 1.3, p: r() * 6.28, f: 0.5 + r() * 2.5, rot: r() * 6.28
+    }));
+  }
+  function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+  const grain = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 200;
+    const g = c.getContext('2d'), d = g.createImageData(200, 200);
+    for (let i = 0; i < d.data.length; i += 4) { const v = Math.random() * 255; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255; }
+    g.putImageData(d, 0, 0); return c;
+  })();
+
+  // ---------- audio ----------
+  let A = null, analyser, freq, mediaEl = null, demoGain, demoTimer = null, mode = 'none', playing = false;
+  function initAudio() {
+    if (A) return;
+    A = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = A.createAnalyser(); analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.75;
+    analyser.connect(A.destination);
+    freq = new Uint8Array(analyser.frequencyBinCount);
+    demoGain = A.createGain(); demoGain.gain.value = 0.85; demoGain.connect(analyser);
+  }
+  let step = 0, nextT = 0, nbuf = null;
+  const SL = 60 / 140 / 4;
+  const noise = () => { if (nbuf) return nbuf; nbuf = A.createBuffer(1, A.sampleRate * 0.5, A.sampleRate); const d = nbuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; return nbuf; };
+  const env = (g, t, p, d) => { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(p, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, t + d); };
+  function osc(type, f, t, p, d) { const o = A.createOscillator(), g = A.createGain(); o.type = type; o.frequency.value = f; env(g, t, p, d); o.connect(g); g.connect(demoGain); o.start(t); o.stop(t + d + 0.05); return o; }
+  function nz(t, type, f, p, d) { const s = A.createBufferSource(); s.buffer = noise(); const fl = A.createBiquadFilter(); fl.type = type; fl.frequency.value = f; const g = A.createGain(); env(g, t, p, d); s.connect(fl); fl.connect(g); g.connect(demoGain); s.start(t); s.stop(t + d + 0.05); }
+  const midi = n => 440 * Math.pow(2, (n - 69) / 12);
+  const BOX = [[76, null, 79, null, 77, null, 76, 74, 76, null, null, null, 71, null, 72, null], [76, null, 79, null, 81, null, 79, 77, 76, null, 74, null, 72, null, 71, null]];
+  const BASS = [40, 40, 43, 38];
+  function sched(k, t) {
+    const i = k % 16, bar = Math.floor(k / 16), n = BOX[bar % 2][i];
+    if (n) { osc('sine', midi(n), t, 0.16, 0.9); osc('triangle', midi(n + 12), t, 0.04, 0.4); }
+    if (i % 2 === 0) nz(t, 'highpass', 8000, 0.1, 0.04);
+    if (i === 0 || i === 10 || (bar % 2 && i === 13)) { const o = osc('sine', 150, t, 1, 0.9); o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(38, t + 0.12); osc('sine', midi(BASS[bar % 4] - 12), t, 0.5, 1.2); }
+    if (i === 8) nz(t, 'bandpass', 2200, 0.6, 0.2);
+  }
+  const demoTick = () => { while (nextT < A.currentTime + 0.12) { sched(step, nextT); step++; nextT += SL; } };
+  function setNow(name) { const n = $('now'); n.textContent = 'Playing: '; const b = document.createElement('b'); b.textContent = name; n.append(b, '. Go fullscreen and screen-record to post it.'); }
+  function setPlaying(p) { playing = p; $('bigplay').hidden = p; $('play').textContent = p ? 'Pause' : (mode === 'song' ? 'Play song' : 'Play demo beat'); }
+  function toggle() {
+    initAudio();
+    if (playing) { if (mode === 'song') mediaEl.pause(); else { clearInterval(demoTimer); demoTimer = null; A.suspend(); } setPlaying(false); return; }
+    A.resume();
+    if (mode === 'song') mediaEl.play();
+    else { if (mode !== 'demo') { mode = 'demo'; step = 0; setNow('Demo beat'); } nextT = Math.max(nextT, A.currentTime + 0.05); demoTimer = setInterval(demoTick, 25); }
+    setPlaying(true);
+  }
+  $('play').onclick = toggle; $('bigplay').onclick = toggle;
+  $('song').addEventListener('change', e => {
+    const f = e.target.files && e.target.files[0]; if (!f) return;
+    initAudio(); clearInterval(demoTimer); demoTimer = null;
+    if (!mediaEl) { mediaEl = new Audio(); mediaEl.loop = true; A.createMediaElementSource(mediaEl).connect(analyser); }
+    if (mediaEl.src) URL.revokeObjectURL(mediaEl.src);
+    mediaEl.src = URL.createObjectURL(f); mode = 'song';
+    const name = f.name.replace(/\.[^.]+$/, ''); setNow(name); $('caption').placeholder = name;
+    A.resume(); mediaEl.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+  });
+  $('full').onclick = () => { const p = cv.requestFullscreen && cv.requestFullscreen(); if (p && p.catch) p.catch(() => {}); };
+  $('color').onchange = recolor;
+  $('shape').onchange = layout;
+  $('sens').oninput = () => { $('sensv').textContent = $('sens').value + '%'; };
+
+  // ---------- analysis ----------
+  const lv = { bass: 0.4, mid: 0.3, high: 0.3, beat: 0.5, avg: 0.3, last: 0 };
+  const band = (a, b) => { let s = 0; for (let i = a; i < b; i++) s += freq[i]; return s / ((b - a) * 255); };
+  function analyse(now) {
+    if (!A || !playing) return false;
+    analyser.getByteFrequencyData(freq);
+    const k = +$('sens').value / 100;
+    const bass = Math.min(1, band(1, 7) * k), mid = Math.min(1, band(8, 90) * k * 1.4), high = Math.min(1, band(120, 500) * k * 2.4);
+    lv.bass += (bass - lv.bass) * 0.5; lv.mid += (mid - lv.mid) * 0.3; lv.high += (high - lv.high) * 0.4;
+    lv.avg += (bass - lv.avg) * 0.04;
+    if (bass > lv.avg * 1.15 && bass > 0.28 && now - lv.last > 0.22) { lv.beat = 1; lv.last = now; }
+    return true;
+  }
+
+  // ---------- draw ----------
+  function star(x, y, r, rot) {
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = rot + i * Math.PI / 5, rr = i % 2 ? r * 0.42 : r;
+      ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+    }
+    ctx.closePath(); ctx.fill();
+  }
+  const fitW = (im, w) => [w, im.height * w / im.width];
+  let last = performance.now() / 1000;
+  function frame() {
+    const now = performance.now() / 1000, dt = Math.min(0.05, now - last); last = now;
+    const live = analyse(now);
+    if (live) lv.beat *= Math.pow(0.03, dt); else lv.beat = 0.5;
+    const { bass, mid, high, beat } = lv, t = now;
+    const ink = INK_RGB[$('color').value];
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+
+    // camera: slow drift + punch on the kick
+    const z = 1.02 + beat * 0.03 + Math.sin(t * 0.3) * 0.006;
+    const sh = live ? beat * 5 : 0;
+    ctx.translate(W / 2 + (Math.random() - 0.5) * sh, H / 2 + (Math.random() - 0.5) * sh);
+    ctx.scale(z, z); ctx.translate(-W / 2, -H / 2);
+
+    // stars
+    ctx.fillStyle = '#fff';
+    for (const s of stars) {
+      const tw = 0.3 + 0.7 * Math.abs(Math.sin(t * s.f + s.p));
+      ctx.globalAlpha = Math.min(1, tw * (0.55 + high * 0.9));
+      if (s.big) star(s.x, s.y, (4 + s.s * 3) * (1 + high * 0.5), s.rot + Math.sin(t * 0.5 + s.p) * 0.2);
+      else ctx.fillRect(s.x, s.y, s.s * 1.6, s.s * 1.6);
+    }
+    ctx.globalAlpha = 1;
+
+    // moon
+    if (IMG.moon) {
+      const [mx, my, mr] = L.moon, r = mr * (1 + bass * 0.06);
+      const halo = ctx.createRadialGradient(mx, my, r * 0.9, mx, my, r * 2.4);
+      halo.addColorStop(0, `rgba(255,255,255,${0.1 + beat * 0.12})`); halo.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = halo; ctx.fillRect(mx - r * 2.5, my - r * 2.5, r * 5, r * 5);
+      ctx.globalAlpha = 0.85 + beat * 0.15;
+      ctx.drawImage(IMG.moon, mx - r, my - r, r * 2, r * 2);
+      ctx.globalAlpha = 1;
+    }
+
+    // dead trees sway with the mids
+    if (INKED.trees) {
+      const [x, base, h] = L.trees, w = h * INKED.trees.width / INKED.trees.height * 1.0;
+      const hh = h * 1.55;
+      ctx.save(); ctx.translate(x + w * 0.75, base);
+      ctx.transform(1, 0, Math.sin(t * 0.8) * 0.02 + mid * 0.03, 1, 0, 0);
+      ctx.drawImage(INKED.trees, -w * 0.75, -hh, w * 1.55, hh);
+      ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.3 + beat * 0.5;
+      ctx.drawImage(INKED.trees, -w * 0.75, -hh, w * 1.55, hh);
+      ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+
+    // merry-go-round, red lines added with a glow on each kick
+    if (INKED.mgr) {
+      const [cx, base, w0] = L.mgr, w = w0 * (1 + beat * 0.025);
+      const [ww, hh] = fitW(INKED.mgr, w);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.85 + beat * 0.15;
+      ctx.drawImage(INKED.mgr, cx - ww / 2, base - hh, ww, hh);
+      ctx.globalAlpha = 0.2 + beat * 0.8 + bass * 0.2;
+      ctx.drawImage(INKED.glow, cx - ww / 2, base - hh, ww, hh);
+      ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+    }
+
+    // ground: curved hill of grainy pebbles
+    if (IMG.ground) {
+      const top = L.hillTop, R = L.hillR;
+      ctx.save();
+      ctx.beginPath(); ctx.arc(W / 2, top + R, R, 0, Math.PI * 2); ctx.clip();
+      ctx.filter = `grayscale(1) contrast(1.8) brightness(${0.42 + beat * 0.22})`;
+      const tw = 520, th = IMG.ground.height * tw / IMG.ground.width;
+      for (let gx = -40; gx < W + 40; gx += tw) for (let gy = top - 10; gy < H + 20; gy += th) ctx.drawImage(IMG.ground, gx, gy, tw, th);
+      ctx.filter = 'none';
+      const fog = ctx.createLinearGradient(0, top, 0, top + 120);
+      fog.addColorStop(0, 'rgba(0,0,0,0.75)'); fog.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = fog; ctx.fillRect(0, top - 20, W, 160);
+      ctx.restore();
+    }
+
+    // raven bobs and leans on the beat
+    if (INKED.raven) {
+      const [x, base, w0] = L.raven, w = w0, h = INKED.raven.height * w / INKED.raven.width;
+      ctx.save(); ctx.translate(x, base - beat * 8);
+      ctx.rotate(-beat * 0.04 + Math.sin(t * 0.7) * 0.01);
+      ctx.drawImage(INKED.raven, -w / 2, -h, w, h);
+      ctx.restore();
+    }
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+    // caption
+    const cap = $('caption').value.trim();
+    if (cap) {
+      ctx.font = `${H > W ? 44 : 38}px "Special Elite", "Courier New", monospace`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.shadowColor = `rgba(${ink},1)`; ctx.shadowBlur = 10 + beat * 20; ctx.fillStyle = '#fff';
+      ctx.fillText(cap, W / 2, L.cap); ctx.shadowBlur = 0;
+    }
+
+    // the pulse: the whole frame dips darker between kicks
+    if (live) { ctx.fillStyle = `rgba(0,0,0,${(1 - beat) * 0.3})`; ctx.fillRect(0, 0, W, H); }
+
+    // grain + soft vignette
+    ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.14;
+    const ox = Math.random() * 200 | 0, oy = Math.random() * 200 | 0;
+    for (let x = -ox; x < W; x += 200) for (let y = -oy; y < H; y += 200) ctx.drawImage(grain, x, y);
+    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+    const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.4, W / 2, H / 2, Math.max(W, H) * 0.75);
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.6)');
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+
+    requestAnimationFrame(frame);
+  }
+
+  layout();
+  loaded.then(() => { recolor(); requestAnimationFrame(frame); });
+})();
+</script>
